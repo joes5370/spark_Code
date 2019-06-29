@@ -1,6 +1,8 @@
 package com.haiteam
 
-import org.apache.spark.sql.SQLContext
+import org.apache.spark.sql.catalyst.analysis.TypeCoercion.WindowFrameCoercion
+import org.apache.spark.sql.expressions.Window
+import org.apache.spark.sql.{SQLContext, SparkSession}
 import org.apache.spark.{SparkConf, SparkContext}
 
 object SparkBook_Study {
@@ -47,7 +49,11 @@ object SparkBook_Study {
     paramData.coalesce(1).write.format("csv").mode("overwrite").option("header","true").
       save("c:/spark/bin/kopo_test.txt")
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
     //SparkSQL
     var selloutFile = "KOPO_PRODUCT_VOLUME.csv"
     var selloutData = spark.read.format("csv").option("header","true").option("Delimiter",",").load("c:/spark_orgin_2.2.0/bin/data/"+selloutFile)
@@ -91,8 +97,98 @@ object SparkBook_Study {
 
     var pivotResult = subqueryFuntionExam.groupBy("REGIONID","PRODUCT").pivot("YEARWEEK",Seq("201501","201502")).sum("ratio")
 
-    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
     //spark 데이터 프레임
+
+    var selloutDataFile = "kopo_product_volume.csv"
+
+    var productData =
+    spark.read.format("csv").
+      option("header","true").
+      option("Delimeter",",").load("c:/spark_orgin_2.2.0/bin/data/"+selloutDataFile)
+    print(productData.show(5))
+
+    //select을 통해 원하는 컬럼값 조회
+    var selectedData =productData.select("PRODUCTGROUP","VOLUME").filter(($"PRODUCTGROUP" === "ST0001")&&($"VOLUME" > 150000))
+
+    var columnData = productData.select("REGIONID","PRODUCTGROUP","YEARWEEK")
+
+    //null처리
+    var missingValueFile = "missingValue.csv"
+
+    var missingData = spark.read.format("csv").option("header","true").option("Delimiter",",").load("c:/spark_orgin_2.2.0/bin/data/"+missingValueFile)
+
+    //뒤에 작성한 컬럼에 null이 있을 경우 출력
+    var missingColumnData = missingData.filter(($"VOLUME".isNull) ||($"TARGET".isNull))
+
+    //전체 컬럼에 하나라도 null값이 있는 경우 해당 값 출력
+    var missingAnyData = missingData.filter(row=>{row.anyNull})
+
+    //전체 컬럼 null값 채우기
+    var filteredAllData = missingData.na.fill("0")
+
+    //특정 컬럼 null값 채우기
+    var targetColume = Array("VOLUME","TARGET")
+    var filteredTargetData = missingData.na.fill("0",targetColume)
+
+    // 데이터 프레임 가공
+    var promotionDataFile = "promotionData.csv"
+    var promotionData = spark.read.format("csv").option("header","true").option("Delimiter",",").load("c:/spark_orgin_2.2.0/bin/data/"+promotionDataFile)
+
+    //데이터 타입 확인
+    promotionData.dtypes.foreach(println)
+
+    //타입 변경
+    var promotionDataTypeChange = promotionData.withColumn("PRICE",$"PRICE".cast("Double")).withColumn("DISCOUNT",$"DISCOUNT".cast("Double"))
+
+    //이상데이터 sql case when과 같은 고급함수를 사용하기 위한 import
+    import org.apache.spark.sql.functions._
+    //new_distcount칼럼을 만들고, discount가 price보다 크다면 0, 그렇지 않으면 discount값 그대로 출력
+    var promotionDataFinal = promotionDataTypeChange.withColumn("NEW_DISCOUNT",when($"DISCOUNT" > $"PRICE",0).otherwise($"DISCOUNT"))
+
+    //데이터 정렬(기본 오름차순)
+    var sortedData = productData.sort("REGIONID","PRODUCTGROUP","YEARWEEK")
+
+    //컬럼별 정렬 오름,내림 (regionid는 오름차순, productgroup은 내림차순, yearweek는 오름차순)
+    var sortedDataPart = productData.sort($"REGIONID".asc,$"PRODUCTGROUP".desc,$"YEARWEEK".asc)
+
+    //집계함수 = groupBy
+    import org.apache.spark.sql.functions._
+    // 지역,상품 별 평균 거래량
+    var groupByData = productData.groupBy($"REGIONID",$"PRODUCTGROUP").agg(mean($"VOLUME") as "MEAN_VOLUME")
+
+    //데이터 조인
+    //inner join
+    var innerjoin = productData.join(promotionData, Seq("REGIONID","PRODUCTGROUP","YEARWEEK"),joinType = "inner")
+    //left join
+    var leftjoin = productData.join(promotionData, Seq("REGIONID","PRODUCTGROUP","YEARWEEK"),joinType = "left_outer")
+
+    //고급함수 구현(이동 집계함수) ->이동평균값 계산가능
+    // 타입변경 및 정렬
+    var refinedproductData = productData.withColumn("VOLUME",$"VOLUME".cast("Double")).sort("REGIONID","PRODUCTGROUP","YEARWEEK")
+
+    //이동 평균 계산 -1,현재,+1 => 이동평균구간은 3
+    import org.apache.spark.sql.expressions.Window
+    var movingAvg = refinedproductData.withColumn("MV_AVG",avg(refinedproductData("VOLUME")).over(Window.partitionBy("REGIONID").rowsBetween(-1,1)))
+
+    //데이터 프레임 피벗
+    var pivotDataFile = "decisionTreeResult.csv"
+    var pivotData = spark.read.format("csv").option("header","true").option("Delimiter",",").load("c:/spark_orgin_2.2.0/bin/data/"+pivotDataFile)
+
+    var sortedPivotData = pivotData.withColumn("SALES",$"SALES".cast("Double")).sort("PRODUCT","ITEM","YEARWEEK")
+
+    var pivotDataResult = sortedPivotData.groupBy("PRODUCT","ITEM","YEARWEEK").pivot("MEASURE",Seq("REAL_QTY","PREDICTION_QTY")).sum("SALES")
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
 
   }
 }
