@@ -24,9 +24,10 @@ object review {
       option("dbtable",selloutDb).
       option("user",staticUser).
       option("password",staticPw).load
+
+      selloutDataFromOracle.show()
       // 메모리 테이블 생성
       selloutDataFromOracle.createOrReplaceTempView("selloutTable")
-      selloutDataFromOracle.show()
 
 
       }

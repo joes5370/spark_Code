@@ -127,10 +127,6 @@ object Spark0613 {
     })
 
     var groupMap = groupRdd.collectAsMap()
-
-
-
-
   }
 
 }

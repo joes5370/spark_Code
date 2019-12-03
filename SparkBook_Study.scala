@@ -2,7 +2,8 @@ package com.haiteam
 
 import org.apache.spark.sql.catalyst.analysis.TypeCoercion.WindowFrameCoercion
 import org.apache.spark.sql.expressions.Window
-import org.apache.spark.sql.{SQLContext, SparkSession}
+import org.apache.spark.sql.types.{StringType, StructField, StructType}
+import org.apache.spark.sql.{Row, SQLContext, SparkSession}
 import org.apache.spark.{SparkConf, SparkContext}
 
 object SparkBook_Study {
@@ -113,8 +114,10 @@ object SparkBook_Study {
     print(productData.show(5))
 
     //select을 통해 원하는 컬럼값 조회
+    //행조회
     var selectedData =productData.select("PRODUCTGROUP","VOLUME").filter(($"PRODUCTGROUP" === "ST0001")&&($"VOLUME" > 150000))
 
+    //열조회
     var columnData = productData.select("REGIONID","PRODUCTGROUP","YEARWEEK")
 
     //null처리
@@ -186,6 +189,327 @@ object SparkBook_Study {
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
     ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    //spark Rdd
+    var filteredDataFile = "filterRddSample.csv"
+
+    var filteredData =
+      spark.read.format("csv").
+        option("header","true").
+        option("Delimeter",",").load("c:/spark_orgin_2.2.0/bin/data/"+filteredDataFile)
+    print(filteredData.show(2))
+
+    var filteredColums = filteredData.columns.map(x=>{x.toLowerCase()})
+    var regionidNo = filteredColums.indexOf("regionid")
+    var productNo = filteredColums.indexOf("productgroup")
+    var yearweekNo = filteredColums.indexOf("yearweek")
+    var volumeNo = filteredColums.indexOf("volume")
+
+    var filterSampleRdd = filteredData.rdd
+
+    //filter 가공
+   var yearweek_size = 6
+    var filteredRdd = filterSampleRdd.filter(row=>{
+      var checkValid = true
+      if(row.getString(yearweekNo).size != yearweek_size){
+        checkValid = false
+      }
+      checkValid
+    })
+
+    //filter null값 filter
+    var missingFilteredRdd = filteredRdd.filter(row=>{
+      var rowSize = row.size
+      var checkValid = true
+      for(i<-0 until(rowSize)){
+        if(row.isNullAt(i) == true)
+          checkValid = false
+      }
+      checkValid
+    })
+
+    //map을 통한 가공
+    var max_volume = 700000
+    var mappedRdd = missingFilteredRdd.map(row=>{
+      var volume = row.getString(volumeNo).toDouble
+      if(volume >=max_volume){
+        volume = max_volume
+      }
+      Row(row.getString(regionidNo),
+        row.getString(productNo),
+        row.getString(yearweekNo),
+        volume)
+    })
+
+    //집계함수 사용 - groupby->map
+    var DataFile = "kopo_product_volume.csv"
+
+    var outData =
+      spark.read.format("csv").
+        option("header","true").
+        option("Delimeter",",").load("c:/spark_orgin_2.2.0/bin/data/"+DataFile)
+
+    var outColums = outData.columns.map(x=>{x.toLowerCase()})
+    var regionidNo = outColums.indexOf("regionid")
+    var productNo = outColums.indexOf("productgroup")
+    var yearweekNo = outColums.indexOf("yearweek")
+    var volumeNo = outColums.indexOf("volume")
+
+    var outRdd = outData.rdd
+
+    var groupRdd = outRdd.groupBy(x=>{
+      (x.getString(regionidNo),x.getString(productNo))
+    }).map(x=>{
+      var key = x._1
+      var data = x._2
+      var size = data.size
+      var volumeSum = data.map(x=>x.getString(volumeNo).toDouble).sum
+      var average = volumeSum/size
+      (key,average)
+    })
+
+    //집계함수 - groupby -> flatmap
+
+    var sampleRdd = outData.rdd
+    var groupFlatMapRdd = sampleRdd.groupBy(x=>{
+      (x.getString(regionidNo),x.getString(productNo))
+    }).flatMap(x=>{
+      var key = x._1
+      var data = x._2
+      var size = data.size
+      var volumeSum = data.map(x=>x.getString(volumeNo).toDouble).sum
+      var avg = volumeSum/size
+
+      var finalData = data.map(x=>{
+        (x.getString(regionidNo),
+          x.getString(productNo),
+          x.getString(yearweekNo),
+          x.getString(volumeNo),
+          avg)
+      })
+      finalData
+    })
+
+    //CollectAsMap -> key와 value를 저장한 후 사용할 수 있다.
+    var collectSampleRdd = outData.rdd
+    var collectAsMapRdd = collectSampleRdd.groupBy(x=>{
+      (x.getString(regionidNo),x.getString(productNo))
+    }).map(x=>{
+      var key = x._1
+      var data =x._2
+      var size = data.size
+      var volumeSum = data.map(x=>x.getString(volumeNo).toDouble).sum
+      var avg = volumeSum / size
+      (key,(size,avg))
+    }).collectAsMap
+
+    //데이터 프레임으로 변환
+    var sampleRddTest = outRdd.map(x=>{
+      (x.getString(regionidNo),x.getString(productNo),x.getString(yearweekNo),x.getString(volumeNo))})
+
+    var resultDf = sampleRddTest.toDF("REGIONID","PRODUCT","YEARWEEK","VOLUME")
+
+
+    var testRddRow = outRdd.map(x=>{
+      Row(x.getString(regionidNo),
+        x.getString(productNo),
+        x.getString(yearweekNo),
+        x.getString(volumeNo))
+    })
+
+    var  resultRdwDf = spark.createDataFrame(testRddRow,
+      StructType(Seq(
+        StructField("REGIONID",StringType),
+        StructField("PRODUCT",StringType),
+        StructField("YEARWEEK",StringType),
+        StructField("VOLUME",StringType)
+      )))
+
+
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    //통계적 분석 -> 계절설 지수 구하기
+    //함수로 만들어서 파일 불러오기
+    var filePath = "C:/spark_orgin_2.2.0/bin/data/"
+    var sampleName = "kopo_product_sellout.csv"
+
+    def csvFileLoading(workPath: String, fileName: String)
+    :org.apache.spark.sql.DataFrame = {
+      var outDataFrame =
+        spark.read.format("csv").
+          option("header","true").
+          option("Delimiter",",").
+          load(workPath+fileName)
+      outDataFrame
+    }
+
+    var sampleData = csvFileLoading(filePath,sampleName)
+    print(sampleData.show())
+
+    //데이터 정제 -> 53주차제거, 생산량 700000변경(최대값), qty 마이너스값 0 변경
+    sampleData.createOrReplaceTempView("SELLOUT_VIEW")
+    var exceptWeek = "53"
+    var minVolume = 0
+    var maxVolume = 700000
+    var refinedQuery ="""select regionid, product, yearweek, cast(case when qty < """+minVolume+""" then 0 when qty > """+maxVolume+""" then 700000 else qty end as DOUBLE) as qty from sellout_view where 1=1 and substr(yearweek,5,6) != """+exceptWeek
+
+
+    var selloutDf = spark.sql(refinedQuery)
+    print(selloutDf.show)
+
+    var sampleDfColumes = selloutDf.columns.map(x=>{x.toLowerCase})
+    var regionidNo = sampleDfColumes.indexOf("regionid")
+    var productNo = sampleDfColumes.indexOf("product")
+    var yearweekNo = sampleDfColumes.indexOf("yearweek")
+    var qtyNo = sampleDfColumes.indexOf("qty")
+
+    var seasonRdd = selloutDf.rdd.groupBy(x=>{
+      (x.getString(regionidNo),x.getString(productNo))
+    }).flatMap(x=>{
+      var key = x._1
+      var data = x._2
+      var sum_qty = data.map(x=>{x.getDouble(qtyNo)}).sum
+
+      var size = data.size
+      var avg = math.round(sum_qty / size)
+      var finalData = data.map(x=>{
+        var ratio = 1.0d
+        var each_qty = x.getDouble(qtyNo)
+        ratio = each_qty / avg
+        ratio = Math.round(ratio*100.0) / 100.0d
+
+        (x.getString(regionidNo),
+          x.getString(productNo),
+          x.getString(yearweekNo),
+          x.getDouble(qtyNo),
+          avg,
+          ratio.toDouble)
+
+      })
+      finalData
+    })
+
+    var yearweekResult = seasonRdd.toDF("REGIONID","PRODUCT","YEARWEEK","QTY","AVG_QTY","RATIO")
+
+    yearweekResult.createOrReplaceTempView("MIDDLE_VIEW")
+
+    var seasonlityQuery ="""select regionid, product,substr(yearweek,5,6) as week,round(avg(ratio),2) as ratio from MIDDLE_VIEW group by regionid, product,substr(yearweek,5,6)"""
+
+    var seasonalityDf = spark.sql(seasonlityQuery)
+
+    print(seasonalityDf.sort("REGIONID","PRODUCT","WEEK").show())
+
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+    ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+    //머신러닝 -> 지도 학습
+
+    var filePath = "C:/spark_orgin_2.2.0/bin/data/"
+    var sampleName = "kopo_decisiontree_input.csv"
+
+    def csvFileLoading(workPath: String, fileName: String)
+    :org.apache.spark.sql.DataFrame = {
+      var outDataFrame =
+        spark.read.format("csv").
+          option("header","true").
+          option("Delimiter",",").
+          load(workPath+fileName)
+      outDataFrame
+    }
+
+    var sampleData = csvFileLoading(filePath,sampleName)
+    print(sampleData.show())
+
+    //데이터 타입 변경
+    var dtInput = sampleData.withColumn("QTY",$"QTY".cast("Double")).withColumn("PRO_PERCENT",$"PRO_PERCENT".cast("Double"))
+
+    //머신러닝 라이브러리
+    import org.apache.spark.ml.Pipeline
+    import org.apache.spark.ml.evaluation.RegressionEvaluator
+    import org.apache.spark.ml.feature.VectorAssembler
+    import org.apache.spark.ml.regression.{DecisionTreeRegressionModel,DecisionTreeRegressor}
+    import org.apache.spark.ml.feature.{StringIndexer}
+
+    //문자값에 인덱스 숫자를 적용시키는 방법 -> StringIndexer
+    val holidayIndexer = new StringIndexer().setInputCol("HOLIDAY").setOutputCol("HOLIDAY_IN")
+    val promotionIndexer = new StringIndexer().setInputCol("PROMOTION").setOutputCol("PROMOTION_IN")
+
+    //학습과 예측 데이터 분리
+    var targetYearweek = 201630
+    val trainData = dtInput.filter($"YEARWEEK" <= targetYearweek)
+    val testData = dtInput.filter($"YEARWEEK" > targetYearweek)
+
+    //훈련
+    val assembler = new VectorAssembler().setInputCols(Array("HOLIDAY_IN","PROMOTION_IN","PRO_PERCENT")).setOutputCol("FEATURES")
+
+    var dt = new DecisionTreeRegressor().setLabelCol("QTY").setFeaturesCol("FEATURES")
+
+    val pipeline = new Pipeline().setStages(Array(holidayIndexer,promotionIndexer,assembler,dt))
+
+    val model = pipeline.fit(trainData)
+
+    val predictions = model.transform(testData)
+
+    predictions.select("REGIONID","PRODUCT","ITEM","YEARWEEK","QTY","FEATURES","PREDICTION").orderBy("YEARWEEK").show
+
+    //MAE, RMSE 평가
+    val evaluatorRmse = new RegressionEvaluator().setLabelCol("QTY").setPredictionCol("prediction").setMetricName("rmse")
+
+    val evauatorMae = new RegressionEvaluator().setLabelCol("QTY").setPredictionCol("prediction").setMetricName("mae")
+
+    val rmse = evaluatorRmse.evaluate(predictions)
+    val mae = evauatorMae.evaluate(predictions)
+
+
+    //머신러닝 -> 비지도학습
+
+    var filePath = "C:/spark_orgin_2.2.0/bin/data/"
+    var machineName = "student_middle.csv"
+
+    def csvFileLoading(workPath: String, fileName: String)
+    :org.apache.spark.sql.DataFrame = {
+      var outDataFrame =
+        spark.read.format("csv").
+          option("header","true").
+          option("Delimiter",",").
+          load(workPath+fileName)
+      outDataFrame
+    }
+
+    var machineData = csvFileLoading(filePath,machineName)
+    print(machineData.show())
+
+    //데이터 타입변경
+    var kmeansInput = machineData.withColumn("SW",$"SW".cast("Double")).withColumn("DB",$"DB".cast("Double")).withColumn("AND",$"AND".cast("Double"))
+    kmeansInput.dtypes
+
+    //k-means Clustering 라이브러리 추가
+    import org.apache.spark.ml.feature.VectorAssembler
+    import org.apache.spark.ml.Pipeline
+    import org.apache.spark.ml.clustering.KMeans
+
+    //훈련
+    var assembler = new VectorAssembler().setInputCols(Array("SW","DB","AND")).setOutputCol("FEATURES")
+    var kValue = 2
+    val kmeans = new KMeans().setK(kValue).setFeaturesCol("FEATURES").setPredictionCol("PREDICTION")
+    val pipeline = new Pipeline().setStages(Array(assembler,kmeans))
+    val kMeansPredictionModel = pipeline.fit(kmeansInput)
+
+    //예측
+    val predictionResult = kMeansPredictionModel.transform(kmeansInput)
+
+
+
+
+
+
+
+
+
 
 
 

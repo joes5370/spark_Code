@@ -138,23 +138,23 @@ object 정형석_spark기말고사 {
         var key = x._1
         var data = x._2
 
-        // Calculate the average for each group
-        // var avg = data.
-        var avg =1.0d
+          // Calculate the average for each group
+          // var avg = data.
+          var avg =1.0d
 
-        var sumation = data.map(x=>{x.get(qtyNo).toString.toDouble}).sum
-        var size = data.size
-        if (size != 0){
-          avg = sumation/size
-        }
-        // Calulate the ratio , ratio = each_qty / avg
-        var finalData = data.map(x=>{
+          var sumation = data.map(x=>{x.get(qtyNo).toString.toDouble}).sum
+          var size = data.size
+          if (size != 0){
+            avg = sumation/size
+          }
+          // Calulate the ratio , ratio = each_qty / avg
+          var finalData = data.map(x=>{
 
-          var ratio = 1.0d
-          var each_qty = x.getDouble(qtyNo)
-          // ratio =
-          // !!!!!!!!! Blanks Start
-          // 분모 0 처리를 해주어야 한다.
+            var ratio = 1.0d
+            var each_qty = x.getDouble(qtyNo)
+            // ratio =
+            // !!!!!!!!! Blanks Start
+            // 분모 0 처리를 해주어야 한다.
           if(avg != 0){
             ratio = each_qty / avg
           }

@@ -65,6 +65,104 @@ object 문제원형 {
     //두개 RDD
     var salesRdd = salesDf.rdd
     var promotionRdd = promotionDf.rdd
+    var minPlanWeek = promotionRdd.map(x=>{x.getString(planweekno).toInt}).min()
+
+
+    var filteredPromotion = promotionRdd.filter(x=>{
+      var check = false
+      var targetWeek = x.getString(targetweekno3)
+      var map_price = x.getString(map_priceno)
+      if(targetWeek.toInt > minPlanWeek && map_price.toInt != 0){
+        check = true
+      }
+      check
+    })
+
+//    var filteredPromotion = promotionRdd.filter(x=>{
+//      var check = false
+//      var targetWeek = x.getString(targetweekno3)
+//      var map_price = x.getString(map_priceno)
+//      if(targetWeek.toInt > minPlanWeek){
+//        check = true
+//      }
+//      check
+//    })
+
+//    var maxTargetWeek = filteredPromotion.map(x=>{x.getString(targetweekno3).toInt}).min()
+
+    var filterMap = filteredPromotion.map(x=>{
+      (x.getString(regionidno),
+        x.getString(salesidno),
+        x.getString(productgroup2),
+        x.getString(itemno),
+        x.getString(targetweekno3),
+        x.getString(planweekno),
+        x.getString(map_priceno),
+        x.getString(irno),
+        x.getString(pmapno),
+        x.getString(pmap10no),
+        x.getString(pro_percentno))
+    })
+
+
+    var testDf = filterMap.toDF("REGIONSEG","SALESID","PRODUCTGROUP","ITEM","TARGETWEEK","PLANWEEK","MAP_PRICE","IR","PMAP","PMAP10","PRO_PERCENT")
+
+    testDf.createOrReplaceTempView("filterPromotion")
+
+    salesDf.createOrReplaceTempView("salesData")
+
+    var leftJoinData = spark.sql("""SELECT A.*,B.MAP_PRICE,B.IR,B.PMAP,B.PMAP10,B.PRO_PERCENT FROM salesData A left join filterPromotion B ON A.regionseg1 = B.REGIONSEG AND A.productseg2 = B.PRODUCTGROUP AND A.regionseg2 = B.SALESID AND A.productseg3 = ITEM and A.yearweek = B.TARGETWEEK""")
+
+    var innerJoinData = spark.sql("""SELECT A.*,B.MAP_PRICE,B.IR,B.PMAP,B.PMAP10,B.PRO_PERCENT FROM salesData A inner join filterPromotion B ON A.regionseg1 = B.REGIONSEG AND A.productseg2 = B.PRODUCTGROUP AND A.regionseg2 = B.SALESID AND A.productseg3 = ITEM and A.yearweek = B.TARGETWEEK""")
+
+    leftJoinData.
+      coalesce(1). // 파일개수
+      write.format("csv").  // 저장포맷
+      mode("overwrite"). // 저장모드 append/overwrite
+      option("header", "true"). // 헤더 유/무
+      save("c:/spark/bin/data/pro_actual_sales_season.csv") // 저장파일명
+
+    innerJoinData.
+      coalesce(1). // 파일개수
+      write.format("csv").  // 저장포맷
+      mode("overwrite"). // 저장모드 append/overwrite
+      option("header", "true"). // 헤더 유/무
+      save("c:/spark/bin/data/innerJoin.csv") // 저장파일명
+
+
+    //계절성 지수 뽑기?
+    var leftJoinColums = leftJoinData.columns.map(x=>{x.toLowerCase()})
+    var regionidno1 = leftJoinColums.indexOf("regionseg1")
+    var productno1 = leftJoinColums.indexOf("productseg1")
+    var productno2 = leftJoinColums.indexOf("productseg2")
+    var regionidno2 = leftJoinColums.indexOf("regionseg2")
+    var regionidno3 = leftJoinColums.indexOf("regionseg3")
+    var productno3 = leftJoinColums.indexOf("productseg3")
+    var yearweekno = leftJoinColums.indexOf("yearweek")
+    var yearno = leftJoinColums.indexOf("year")
+    var weekno = leftJoinColums.indexOf("week")
+    var qtyno = leftJoinColums.indexOf("qty")
+    var map_priceno = leftJoinColums.indexOf("map_price")
+    var irno = leftJoinColums.indexOf("ir")
+    var pmapno = leftJoinColums.indexOf("pmap")
+    var pmap10no = leftJoinColums.indexOf("pmap10")
+    var pro_percentno = leftJoinColums.indexOf("pro_percent")
+
+
+    var leftJoinRdd = leftJoinData.rdd
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
   }
